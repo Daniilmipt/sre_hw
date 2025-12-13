@@ -1,0 +1,132 @@
+---
+# PostgreSQL HA Cluster Deployment Playbook
+# Deploys etcd, Patroni, PostgreSQL 16, and HAProxy
+# Based on autobase.vitabaks collection v2.4.1
+# ansible-playbook -i inventory.ini playbook.yaml -e "dcs_type=etcd with_haproxy_load_balancing=true"
+
+- name: Deploy PostgreSQL HA Cluster with Patroni
+  hosts: all
+  gather_facts: yes
+  become: yes
+  serial: 1  # Run tasks serially to avoid apt-get lock conflicts when multiple hosts point to same VM
+  collections:
+    - autobase.vitabaks
+
+  pre_tasks:
+    - name: Clean up any conflicting PostgreSQL repository configurations
+      # Run on all hosts to ensure clean state before role execution
+      block:
+        - name: Remove any existing PostgreSQL repository files
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /etc/apt/sources.list.d/pgdg.list
+            - /etc/apt/sources.list.d/postgresql.list
+            - /etc/apt/keyrings/apt-postgresql-org.asc
+          ignore_errors: yes
+          changed_when: false
+
+        - name: Remove PostgreSQL repository entries from all sources files
+          ansible.builtin.shell: |
+            for file in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+              if [ -f "$file" ]; then
+                if grep -q 'apt.postgresql.org' "$file"; then
+                  sudo sed -i '/apt.postgresql.org/d' "$file"
+                  echo "Removed postgresql entries from $file"
+                fi
+              fi
+            done
+          changed_when: true
+          ignore_errors: yes
+          register: cleanup_result
+
+        - name: Update apt cache after cleanup
+          ansible.builtin.apt:
+            update_cache: yes
+            cache_valid_time: 0
+          ignore_errors: yes
+          when: cleanup_result.changed | default(false)
+
+    - name: Clean up existing PostgreSQL data directories
+      # Run on PostgreSQL hosts (master and replica) - ensure clean state for fresh deployment
+      when: "'master' in group_names or 'replica' in group_names"
+      block:
+        - name: Stop PostgreSQL service if running
+          ansible.builtin.systemd:
+            name: postgresql
+            state: stopped
+          ignore_errors: yes
+          failed_when: false
+
+        - name: Stop Patroni service if running
+          ansible.builtin.systemd:
+            name: patroni
+            state: stopped
+          ignore_errors: yes
+          failed_when: false
+
+        - name: Check if PostgreSQL data directory exists
+          ansible.builtin.stat:
+            path: "{{ postgresql_data_dir | default('/var/lib/postgresql/16/main') }}"
+          register: pg_data_dir_stat
+          ignore_errors: yes
+          failed_when: false
+
+        - name: Remove existing PostgreSQL data directory
+          ansible.builtin.file:
+            path: "{{ postgresql_data_dir | default('/var/lib/postgresql/16/main') }}"
+            state: absent
+          when: pg_data_dir_stat.stat.exists | default(false)
+          ignore_errors: yes
+          changed_when: true
+
+        - name: Remove PostgreSQL version directory if exists
+          ansible.builtin.file:
+            path: "/var/lib/postgresql/{{ postgresql_version | default('16') }}"
+            state: absent
+          ignore_errors: yes
+          changed_when: true
+
+        - name: Ensure PostgreSQL data directory is completely removed (force cleanup)
+          ansible.builtin.shell: |
+            # Stop all PostgreSQL and Patroni services
+            sudo systemctl stop postgresql postgresql@* patroni 2>/dev/null || true
+            sudo pkill -9 postgres 2>/dev/null || true
+            sudo pkill -9 patroni 2>/dev/null || true
+            sleep 2
+            
+            # Remove all PostgreSQL data directories and files
+            sudo rm -rf /var/lib/postgresql/{{ postgresql_version | default('16') }}/main 2>/dev/null || true
+            sudo rm -rf /var/lib/postgresql/{{ postgresql_version | default('16') }} 2>/dev/null || true
+            sudo rm -rf /var/lib/postgresql/*/main 2>/dev/null || true
+            
+            # Remove any lock files or initialization markers
+            sudo rm -f /var/lib/postgresql/*/main/PG_VERSION 2>/dev/null || true
+            sudo rm -f /var/lib/postgresql/*/main/postmaster.pid 2>/dev/null || true
+            sudo rm -f /var/run/postgresql/*.pid 2>/dev/null || true
+            
+            # Verify removal
+            if [ -d "/var/lib/postgresql/{{ postgresql_version | default('16') }}/main" ]; then
+              echo "WARNING: Directory still exists after cleanup"
+              exit 1
+            else
+              echo "PostgreSQL data directories successfully cleaned up"
+            fi
+          changed_when: true
+          ignore_errors: yes
+          
+        - name: Verify PostgreSQL data directory is removed
+          ansible.builtin.stat:
+            path: "{{ postgresql_data_dir | default('/var/lib/postgresql/16/main') }}"
+          register: pg_data_dir_verify
+          failed_when: pg_data_dir_verify.stat.exists | default(false)
+          changed_when: false
+          
+        - name: Set postgresql_exists to false to ensure fresh installation
+          ansible.builtin.set_fact:
+            postgresql_exists: false
+          when: "'master' in group_names or 'replica' in group_names"
+
+  roles:
+    - autobase.vitabaks.postgresql_cluster
