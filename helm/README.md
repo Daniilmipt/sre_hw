@@ -46,6 +46,10 @@ export KUBECONFIG=<path to student_2.yaml>
 **Удаление существующего релиза (если есть):**
 
 ```bash
+kubectl config set-cluster kubernetes --insecure-skip-tls-verify=true
+```
+
+```bash
 helm uninstall api-chart -n sre-cource-student-2
 ```
 
@@ -62,4 +66,4 @@ helm install api-chart ./helm/api-chart -n sre-cource-student-2
 ```bash
 kubectl port-forward -n sre-cource-student-2 svc/api-chart 8080:80
 ```
-Swagger будет доступен по адресу: `http://localhost:8080`
+Swagger будет доступен по адресу: `http://localhost:8080/swagger/index.html`
