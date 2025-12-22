@@ -18,11 +18,11 @@ ingress:
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
 
 database:
-  host: "192.168.1.34"
-  port: "5000"
+  host: "176.120.236.113"
+  port: "6432"
   name: "postgres"
   username: "postgres"
-  password: "SecurePass123!"
+  password: "postgres"
 
 resources:
   limits:
@@ -35,3 +35,4 @@ resources:
 env:
   ASPNETCORE_ENVIRONMENT: "Development"
   SERILOG__MINIMUMLEVEL__DEFAULT: "Verbose"
+
