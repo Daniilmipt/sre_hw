@@ -1,0 +1,14 @@
+---
+- name: Ensure API host resolves on balancer for blackbox
+  hosts: balancers
+  become: yes
+  tasks:
+    - name: Add hosts entry for student2-api.autobase.tech (ingress IP)
+      lineinfile:
+        path: /etc/hosts
+        line: "192.168.1.100 student2-api.autobase.tech"
+        state: present
+        create: yes
+        backup: yes
+
+

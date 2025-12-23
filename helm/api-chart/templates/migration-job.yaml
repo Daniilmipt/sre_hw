@@ -1,0 +1,81 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Chart.Name }}-migration
+  namespace: sre-cource-student-2
+  labels:
+    app: {{ .Chart.Name }}
+    component: migration
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: {{ .Chart.Name }}
+        component: migration
+    spec:
+      restartPolicy: Never
+      initContainers:
+      - name: copy-migration
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          cp /app/Migrations/init.sql /shared/init.sql
+          echo "Migration file copied to /shared/init.sql"
+        volumeMounts:
+        - name: migration-sql
+          mountPath: /shared
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      # Основной контейнер: выполняет SQL через postgres:alpine
+      containers:
+      - name: migration
+        image: postgres:alpine
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Starting database migration..."
+          echo "Connecting to PostgreSQL at {{ .Values.database.host }}:{{ .Values.database.port }}"
+          PGPASSWORD="{{ .Values.database.password }}" psql \
+            -h {{ .Values.database.host }} \
+            -p {{ .Values.database.port }} \
+            -U {{ .Values.database.username }} \
+            -d {{ .Values.database.name }} \
+            -f /shared/init.sql
+          echo "Migration completed successfully"
+        volumeMounts:
+        - name: migration-sql
+          mountPath: /shared
+        env:
+        - name: PGHOST
+          value: "{{ .Values.database.host }}"
+        - name: PGPORT
+          value: "{{ .Values.database.port }}"
+        - name: PGDATABASE
+          value: "{{ .Values.database.name }}"
+        - name: PGUSER
+          value: "{{ .Values.database.username }}"
+        - name: PGPASSWORD
+          value: "{{ .Values.database.password }}"
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      volumes:
+      - name: migration-sql
+        emptyDir: {}
