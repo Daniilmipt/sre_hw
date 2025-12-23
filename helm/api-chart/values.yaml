@@ -18,11 +18,11 @@ ingress:
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
 
 database:
-  host: "176.120.236.113"
-  port: "6432"
+  host: "192.168.1.16"
+  port: "5000"
   name: "postgres"
   username: "postgres"
-  password: "postgres"
+  password: "PWaXOW32Gkp3wBNJr6GRrsob997aQuyM"
 
 resources:
   limits:
