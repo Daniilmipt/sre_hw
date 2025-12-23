@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}
+  namespace: sre-cource-student-2
+  labels:
+    app: {{ .Chart.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Chart.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Chart.Name }}
+    spec:
+      containers:
+      - name: api
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.service.targetPort }}
+          protocol: TCP
+        env:
+        - name: ASPNETCORE_ENVIRONMENT
+          value: {{ .Values.env.ASPNETCORE_ENVIRONMENT | quote }}
+        - name: SERILOG__MINIMUMLEVEL__DEFAULT
+          value: {{ .Values.env.SERILOG__MINIMUMLEVEL__DEFAULT | quote }}
+        - name: ConnectionStrings__PgConnection
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Chart.Name }}-secret
+              key: connection-string
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        livenessProbe:
+          tcpSocket:
+            port: {{ .Values.service.targetPort }}
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          tcpSocket:
+            port: {{ .Values.service.targetPort }}
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 3

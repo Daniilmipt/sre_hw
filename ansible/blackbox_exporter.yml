@@ -1,0 +1,67 @@
+---
+- name: Install blackbox_exporter on balancer
+  hosts: balancers
+  become: yes
+  tasks:
+    - name: Download blackbox_exporter
+      get_url:
+        url: "https://github.com/prometheus/blackbox_exporter/releases/download/v0.24.0/blackbox_exporter-0.24.0.linux-amd64.tar.gz"
+        dest: /tmp/blackbox_exporter.tar.gz
+        mode: '0644'
+
+    - name: Extract blackbox_exporter
+      unarchive:
+        src: /tmp/blackbox_exporter.tar.gz
+        dest: /tmp
+        remote_src: true
+
+    - name: Install blackbox_exporter binary
+      copy:
+        src: /tmp/blackbox_exporter-0.24.0.linux-amd64/blackbox_exporter
+        dest: /usr/local/bin/blackbox_exporter
+        owner: root
+        group: root
+        mode: '0755'
+        remote_src: true
+
+    - name: Create blackbox_exporter config
+      copy:
+        dest: /etc/blackbox_exporter.yml
+        mode: '0644'
+        content: |
+          modules:
+            http_2xx:
+              prober: http
+              timeout: 5s
+              http:
+                method: GET
+            tcp_connect:
+              prober: tcp
+              timeout: 5s
+
+    - name: Create blackbox_exporter service
+      copy:
+        dest: /etc/systemd/system/blackbox_exporter.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Blackbox Exporter
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=nobody
+          ExecStart=/usr/local/bin/blackbox_exporter --config.file=/etc/blackbox_exporter.yml --web.listen-address=:9115
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start blackbox_exporter
+      systemd:
+        name: blackbox_exporter
+        enabled: true
+        state: started
+        daemon_reload: true
+
+
