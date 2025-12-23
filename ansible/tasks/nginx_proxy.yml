@@ -1,0 +1,59 @@
+---
+- name: Configure nginx proxy for Prometheus on balancer (expose via /)
+  hosts: balancers
+  become: yes
+  tasks:
+    - name: Ensure nginx is installed
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+
+    - name: Ensure nginx dirs exist
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /etc/nginx/sites-available
+        - /etc/nginx/sites-enabled
+
+    - name: Create nginx site for Prometheus (root on /)
+      copy:
+        dest: /etc/nginx/sites-available/prometheus.conf
+        mode: '0644'
+        content: |
+          server {
+              listen 80 default_server;
+              server_name 77.105.182.79 prometheus.training.course.sre.mts;
+
+              location / {
+                  proxy_pass http://127.0.0.1:9090/;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+              }
+          }
+
+    - name: Enable nginx site
+      file:
+        src: /etc/nginx/sites-available/prometheus.conf
+        dest: /etc/nginx/sites-enabled/prometheus.conf
+        state: link
+        force: true
+
+    - name: Disable default nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Test nginx config
+      command: nginx -t
+      register: nginx_test
+      failed_when: nginx_test.rc != 0
+
+    - name: Reload nginx
+      systemd:
+        name: nginx
+        state: reloaded
+
+

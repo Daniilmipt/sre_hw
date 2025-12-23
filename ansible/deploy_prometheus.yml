@@ -1,0 +1,8 @@
+---
+- import_playbook: tasks/prometheus.yml
+- import_playbook: tasks/node_exporter.yml
+- import_playbook: tasks/postgres_exporter.yml
+- import_playbook: tasks/blackbox_exporter.yml
+- import_playbook: tasks/nginx_proxy.yml
+- import_playbook: tasks/hosts_entry.yml
+
