@@ -1,16 +1,15 @@
 ---
-- name: Install Prometheus on balancer with cloudalchemy.prometheus
+- name: Prometheus on balancer
   hosts: balancers
   become: yes
   gather_facts: true
   pre_tasks:
-    - name: Gather facts from all hosts (for scrape targets)
+    - name: get targets
       setup:
       delegate_to: "{{ item }}"
       delegate_facts: true
       run_once: true
       loop: "{{ groups['all'] }}"
-
   roles:
     - role: cloudalchemy.prometheus
 
@@ -76,5 +75,3 @@
             target_label: instance
           - target_label: __address__
             replacement: "127.0.0.1:9115"
-
-

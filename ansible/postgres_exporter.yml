@@ -1,5 +1,5 @@
 ---
-- name: Install postgres_exporter on postgres nodes
+- name: Postgres_exporter on postgres nodes
   hosts: postgres_cluster
   become: yes
   tasks:

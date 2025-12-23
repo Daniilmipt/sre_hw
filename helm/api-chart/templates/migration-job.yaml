@@ -20,7 +20,6 @@ spec:
         component: migration
     spec:
       restartPolicy: Never
-      # Init container: копирует SQL файл из API образа в shared volume
       initContainers:
       - name: copy-migration
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
