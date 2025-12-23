@@ -1,0 +1,38 @@
+replicaCount: 2
+
+image:
+  repository: ghcr.io/ldest/mfti-course/api
+  tag: latest
+  pullPolicy: Always
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 80
+
+ingress:
+  enabled: true
+  className: nginx-ingress
+  host: student2-api.autobase.tech
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+
+database:
+  host: "192.168.1.16"
+  port: "5000"
+  name: "postgres"
+  username: "postgres"
+  password: "PWaXOW32Gkp3wBNJr6GRrsob997aQuyM"
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+env:
+  ASPNETCORE_ENVIRONMENT: "Development"
+  SERILOG__MINIMUMLEVEL__DEFAULT: "Verbose"
+

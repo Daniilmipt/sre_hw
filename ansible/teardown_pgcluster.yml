@@ -1,0 +1,307 @@
+---
+# PostgreSQL HA Cluster Teardown Playbook
+# Completely removes PostgreSQL cluster, Patroni, etcd, and HAProxy
+# Usage: ansible-playbook -i inventory.ini teardown_pgcluster.yml
+
+- name: Teardown PostgreSQL HA Cluster
+  hosts: "all:!localhost"  # Exclude localhost, only run on remote hosts
+  gather_facts: yes
+  become: yes
+  become_method: sudo
+  serial: 1  # Run serially to avoid conflicts when multiple hosts point to same VM
+  
+  vars:
+    # Set to true to also remove packages (default: false, keeps packages for reuse)
+    remove_packages: false
+    postgresql_version: 18
+    patroni_cluster_name: "student2-postgres-cluster"
+    etcd_data_dir: "/var/lib/etcd"
+    etcd_conf_dir: "/etc/etcd"
+    postgresql_data_dir: "/var/lib/postgresql/{{ postgresql_version }}/main"
+
+  tasks:
+    - name: Display teardown information
+      ansible.builtin.debug:
+        msg: "Starting teardown of PostgreSQL HA cluster: {{ patroni_cluster_name }}"
+
+    ############################################################
+    # Stop services on PostgreSQL hosts
+    ############################################################
+    - name: Stop services on PostgreSQL hosts
+      when: "'master' in group_names or 'replica' in group_names or 'child' in group_names or 'postgres_cluster' in group_names"
+      block:
+        - name: Stop Patroni service
+          ansible.builtin.systemd:
+            name: patroni
+            state: stopped
+          ignore_errors: yes
+          failed_when: false
+
+        - name: Stop PostgreSQL service
+          ansible.builtin.systemd:
+            name: postgresql
+            state: stopped
+          ignore_errors: yes
+          failed_when: false
+
+        - name: Stop all PostgreSQL systemd instances
+          ansible.builtin.shell: |
+            systemctl stop postgresql@* 2>/dev/null || true
+          changed_when: false
+          ignore_errors: yes
+
+        - name: Kill any remaining PostgreSQL processes
+          ansible.builtin.shell: |
+            pkill -9 postgres 2>/dev/null || true
+            sleep 1
+          changed_when: false
+          ignore_errors: yes
+
+        - name: Kill any remaining Patroni processes
+          ansible.builtin.shell: |
+            pkill -9 patroni 2>/dev/null || true
+            sleep 1
+          changed_when: false
+          ignore_errors: yes
+
+    ############################################################
+    # Stop services on etcd hosts
+    ############################################################
+    - name: Stop services on etcd hosts
+      when: "'etcd_cluster' in group_names"
+      block:
+        - name: Stop etcd service
+          ansible.builtin.systemd:
+            name: etcd
+            state: stopped
+          ignore_errors: yes
+          failed_when: false
+
+        - name: Kill any remaining etcd processes
+          ansible.builtin.shell: |
+            pkill -9 etcd 2>/dev/null || true
+            sleep 1
+          changed_when: false
+          ignore_errors: yes
+
+    ############################################################
+    # Stop services on HAProxy hosts
+    ############################################################
+    - name: Stop services on HAProxy hosts
+      when: "'balancers' in group_names"
+      block:
+        - name: Stop HAProxy service
+          ansible.builtin.systemd:
+            name: haproxy
+            state: stopped
+          ignore_errors: yes
+          failed_when: false
+
+        - name: Kill any remaining HAProxy processes
+          ansible.builtin.shell: |
+            pkill -9 haproxy 2>/dev/null || true
+            sleep 1
+          changed_when: false
+          ignore_errors: yes
+
+    ############################################################
+    # Remove data directories on PostgreSQL hosts
+    ############################################################
+    - name: Remove PostgreSQL data directories
+      when: "'master' in group_names or 'replica' in group_names or 'child' in group_names or 'postgres_cluster' in group_names"
+      block:
+        - name: Remove PostgreSQL data directory
+          ansible.builtin.file:
+            path: "{{ postgresql_data_dir }}"
+            state: absent
+          ignore_errors: yes
+
+        - name: Remove PostgreSQL version directory
+          ansible.builtin.file:
+            path: "/var/lib/postgresql/{{ postgresql_version }}"
+            state: absent
+          ignore_errors: yes
+
+        - name: Force remove all PostgreSQL data directories
+          ansible.builtin.shell: |
+            rm -rf /var/lib/postgresql/{{ postgresql_version }}/main 2>/dev/null || true
+            rm -rf /var/lib/postgresql/{{ postgresql_version }} 2>/dev/null || true
+            rm -rf /var/lib/postgresql/*/main 2>/dev/null || true
+            rm -f /var/lib/postgresql/*/main/PG_VERSION 2>/dev/null || true
+            rm -f /var/lib/postgresql/*/main/postmaster.pid 2>/dev/null || true
+            rm -f /var/run/postgresql/*.pid 2>/dev/null || true
+            # Also remove version 16 and 18 directories to handle version mismatches
+            rm -rf /var/lib/postgresql/16/main 2>/dev/null || true
+            rm -rf /var/lib/postgresql/18/main 2>/dev/null || true
+            echo "PostgreSQL data directories removed"
+          changed_when: true
+          ignore_errors: yes
+
+    ############################################################
+    # Remove data directories on etcd hosts
+    ############################################################
+    - name: Remove etcd data directories
+      when: "'etcd_cluster' in group_names"
+      block:
+        - name: Remove etcd data directory
+          ansible.builtin.file:
+            path: "{{ etcd_data_dir }}"
+            state: absent
+          ignore_errors: yes
+
+        - name: Force remove etcd data directory
+          ansible.builtin.shell: |
+            rm -rf {{ etcd_data_dir }} 2>/dev/null || true
+            echo "etcd data directory removed"
+          changed_when: true
+          ignore_errors: yes
+
+    ############################################################
+    # Remove configuration files
+    ############################################################
+    - name: Remove configuration files
+      block:
+        - name: Remove Patroni configuration
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /etc/patroni
+            - /etc/patroni.yml
+            - /etc/patroni/patroni.yml
+          ignore_errors: yes
+          when: "'master' in group_names or 'replica' in group_names or 'child' in group_names or 'postgres_cluster' in group_names"
+
+        - name: Remove etcd configuration
+          ansible.builtin.file:
+            path: "{{ etcd_conf_dir }}"
+            state: absent
+          ignore_errors: yes
+          when: "'etcd_cluster' in group_names"
+
+        - name: Remove HAProxy configuration
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /etc/haproxy/haproxy.cfg
+            - /etc/haproxy/patroni-haproxy.cfg
+          ignore_errors: yes
+          when: "'balancers' in group_names"
+
+    ############################################################
+    # Remove systemd service files
+    ############################################################
+    - name: Remove systemd service files
+      block:
+        - name: Remove Patroni systemd service
+          ansible.builtin.file:
+            path: /etc/systemd/system/patroni.service
+            state: absent
+          ignore_errors: yes
+          when: "'master' in group_names or 'replica' in group_names or 'child' in group_names or 'postgres_cluster' in group_names"
+
+        - name: Remove etcd systemd service
+          ansible.builtin.file:
+            path: /etc/systemd/system/etcd.service
+            state: absent
+          ignore_errors: yes
+          when: "'etcd_cluster' in group_names"
+
+        - name: Reload systemd daemon
+          ansible.builtin.systemd:
+            daemon_reload: yes
+          ignore_errors: yes
+          when: ansible_connection != 'local'  # Skip on localhost
+
+    ############################################################
+    # Remove packages (optional)
+    ############################################################
+    - name: Remove packages
+      when: remove_packages | bool
+      block:
+        - name: Remove PostgreSQL packages
+          ansible.builtin.apt:
+            name:
+              - postgresql-{{ postgresql_version }}
+              - postgresql-client-{{ postgresql_version }}
+              - postgresql-common
+            state: absent
+            purge: yes
+          ignore_errors: yes
+          when: "'master' in group_names or 'replica' in group_names or 'child' in group_names or 'postgres_cluster' in group_names"
+
+        - name: Remove Patroni package
+          ansible.builtin.apt:
+            name: patroni
+            state: absent
+            purge: yes
+          ignore_errors: yes
+          when: "'master' in group_names or 'replica' in group_names or 'child' in group_names or 'postgres_cluster' in group_names"
+
+        - name: Remove etcd package
+          ansible.builtin.apt:
+            name: etcd
+            state: absent
+            purge: yes
+          ignore_errors: yes
+          when: "'etcd_cluster' in group_names"
+
+        - name: Remove HAProxy package
+          ansible.builtin.apt:
+            name: haproxy
+            state: absent
+            purge: yes
+          ignore_errors: yes
+          when: "'balancers' in group_names"
+
+    ############################################################
+    # Remove users and groups
+    ############################################################
+    - name: Remove users and groups
+      when: remove_packages | bool
+      block:
+        - name: Remove postgres user
+          ansible.builtin.user:
+            name: postgres
+            state: absent
+            remove: yes
+          ignore_errors: yes
+          when: "'master' in group_names or 'replica' in group_names or 'child' in group_names or 'postgres_cluster' in group_names"
+
+        - name: Remove etcd user
+          ansible.builtin.user:
+            name: etcd
+            state: absent
+            remove: yes
+          ignore_errors: yes
+          when: "'etcd_cluster' in group_names"
+
+    ############################################################
+    # Final cleanup
+    ############################################################
+    - name: Final cleanup
+      block:
+        - name: Remove log files
+          ansible.builtin.shell: |
+            rm -rf /var/log/patroni* 2>/dev/null || true
+            rm -rf /var/log/postgresql* 2>/dev/null || true
+            rm -rf /var/log/etcd* 2>/dev/null || true
+            echo "Log files removed"
+          changed_when: true
+          ignore_errors: yes
+
+        - name: Remove runtime directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /var/run/postgresql
+            - /var/run/etcd
+            - /var/run/patroni
+          ignore_errors: yes
+
+    - name: Display teardown completion
+      ansible.builtin.debug:
+        msg: "Teardown of PostgreSQL HA cluster completed successfully"
+
